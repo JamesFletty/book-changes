@@ -1,0 +1,280 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  name         String?
+  passwordHash String
+  role         String   @default("member")
+  workspaceId  String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  workspace       Workspace?      @relation(fields: [workspaceId], references: [id])
+  ownedWorkspaces Workspace[]     @relation("WorkspaceOwner")
+  domains         Domain[]        @relation("DomainOwner")
+  tasks           Task[]          @relation("TaskAssignee")
+  decisions       DecisionEntry[] @relation("DecisionRecorder")
+  reviewLogs      ReviewLog[]
+  triggerEvents   TriggerEvent[]  @relation("EventLogger")
+  issues          UnresolvedIssue[] @relation("IssueRaiser")
+}
+
+model Workspace {
+  id            String   @id @default(cuid())
+  name          String
+  situationType String   @default("organizing")
+  ownerId       String
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  owner           User              @relation("WorkspaceOwner", fields: [ownerId], references: [id])
+  members         User[]
+  careRecipient   CareRecipient?
+  contacts        Contact[]
+  domains         Domain[]
+  documents       Document[]
+  tasks           Task[]
+  decisions       DecisionEntry[]
+  triggerEvents   TriggerEvent[]
+  reviewLogs      ReviewLog[]
+  expenseEntries  ExpenseEntry[]
+  incomeOffsets   IncomeOffset[]
+  familyMeetings  FamilyMeeting[]
+  unresolvedIssues UnresolvedIssue[]
+  timelineEvents  TimelineEvent[]
+  structuredRecords StructuredRecord[]
+}
+
+model CareRecipient {
+  id               String   @id @default(cuid())
+  workspaceId      String   @unique
+  fullLegalName    String
+  dateOfBirth      String?
+  careSettingType  String   @default("home")
+  conditionContext String?
+  knownAllergies   String?
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id])
+}
+
+model Contact {
+  id           String   @id @default(cuid())
+  workspaceId  String
+  name         String
+  relationship String?
+  phone        String?
+  email        String?
+  roleTag      String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id])
+}
+
+model Domain {
+  id              String    @id @default(cuid())
+  workspaceId     String
+  domainKey       String
+  ownerId         String?
+  status          String    @default("not_started")
+  reviewCadence   String    @default("quarterly")
+  lastReviewedAt  DateTime?
+  nextReviewDueAt DateTime?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  workspace       Workspace       @relation(fields: [workspaceId], references: [id])
+  owner           User?           @relation("DomainOwner", fields: [ownerId], references: [id])
+  documents       Document[]
+  tasks           Task[]
+  decisions       DecisionEntry[]
+  reviewLogs      ReviewLog[]
+  timelineEvents  TimelineEvent[]
+  structuredRecords StructuredRecord[]
+
+  @@unique([workspaceId, domainKey])
+}
+
+model Document {
+  id               String    @id @default(cuid())
+  workspaceId      String
+  domainId         String?
+  documentTypeKey  String
+  displayName      String
+  isCritical       Boolean   @default(false)
+  physicalLocation String?
+  notes            String?
+  currentVersionId String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  workspace Workspace         @relation(fields: [workspaceId], references: [id])
+  domain    Domain?           @relation(fields: [domainId], references: [id])
+  versions  DocumentVersion[]
+}
+
+model DocumentVersion {
+  id            String   @id @default(cuid())
+  documentId    String
+  fileName      String
+  fileSize      Int?
+  fileType      String?
+  versionNumber Int      @default(1)
+  filePath      String
+  createdAt     DateTime @default(now())
+
+  document Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+}
+
+model StructuredRecord {
+  id          String   @id @default(cuid())
+  workspaceId String
+  domainId    String?
+  recordType  String
+  status      String   @default("draft")
+  data        String   @default("{}")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id])
+  domain    Domain?   @relation(fields: [domainId], references: [id])
+}
+
+model Task {
+  id          String    @id @default(cuid())
+  workspaceId String
+  domainId    String?
+  title       String
+  assignedToId String?
+  dueDate     DateTime?
+  status      String    @default("open")
+  sourceType  String    @default("manual")
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  workspace  Workspace @relation(fields: [workspaceId], references: [id])
+  domain     Domain?   @relation(fields: [domainId], references: [id])
+  assignedTo User?     @relation("TaskAssignee", fields: [assignedToId], references: [id])
+}
+
+model TriggerEvent {
+  id          String   @id @default(cuid())
+  workspaceId String
+  eventTypeKey String
+  eventDate   DateTime
+  description String?
+  loggedById  String?
+  createdAt   DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id])
+  loggedBy  User?     @relation("EventLogger", fields: [loggedById], references: [id])
+}
+
+model DecisionEntry {
+  id           String   @id @default(cuid())
+  workspaceId  String
+  domainId     String?
+  description  String
+  rationale    String?
+  decisionDate DateTime
+  participants String?
+  recordedById String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  workspace  Workspace @relation(fields: [workspaceId], references: [id])
+  domain     Domain?   @relation(fields: [domainId], references: [id])
+  recordedBy User?     @relation("DecisionRecorder", fields: [recordedById], references: [id])
+}
+
+model ReviewLog {
+  id          String   @id @default(cuid())
+  workspaceId String
+  domainId    String
+  reviewedById String?
+  reviewedAt  DateTime @default(now())
+  notes       String?
+
+  workspace  Workspace @relation(fields: [workspaceId], references: [id])
+  domain     Domain    @relation(fields: [domainId], references: [id])
+  reviewedBy User?     @relation(fields: [reviewedById], references: [id])
+}
+
+model ExpenseEntry {
+  id          String   @id @default(cuid())
+  workspaceId String
+  category    String
+  amount      Float
+  frequency   String   @default("monthly")
+  isActive    Boolean  @default(true)
+  notes       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id])
+}
+
+model IncomeOffset {
+  id            String   @id @default(cuid())
+  workspaceId   String
+  sourceName    String
+  sourceType    String
+  monthlyAmount Float
+  notes         String?
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id])
+}
+
+model FamilyMeeting {
+  id           String   @id @default(cuid())
+  workspaceId  String
+  meetingDate  DateTime
+  participants String   @default("[]")
+  agenda       String?
+  notes        String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id])
+}
+
+model UnresolvedIssue {
+  id          String   @id @default(cuid())
+  workspaceId String
+  description String
+  category    String?
+  status      String   @default("open")
+  raisedById  String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id])
+  raisedBy  User?     @relation("IssueRaiser", fields: [raisedById], references: [id])
+}
+
+model TimelineEvent {
+  id               String   @id @default(cuid())
+  workspaceId      String
+  eventType        String
+  sourceEntityType String?
+  sourceEntityId   String?
+  domainId         String?
+  summary          String
+  eventDate        DateTime @default(now())
+  createdAt        DateTime @default(now())
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id])
+  domain    Domain?   @relation(fields: [domainId], references: [id])
+}
