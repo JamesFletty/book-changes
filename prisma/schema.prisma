@@ -17,13 +17,13 @@ model User {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  workspace       Workspace?      @relation(fields: [workspaceId], references: [id])
-  ownedWorkspaces Workspace[]     @relation("WorkspaceOwner")
-  domains         Domain[]        @relation("DomainOwner")
-  tasks           Task[]          @relation("TaskAssignee")
-  decisions       DecisionEntry[] @relation("DecisionRecorder")
+  workspace       Workspace?        @relation(fields: [workspaceId], references: [id])
+  ownedWorkspaces Workspace[]       @relation("WorkspaceOwner")
+  domains         Domain[]          @relation("DomainOwner")
+  tasks           Task[]            @relation("TaskAssignee")
+  decisions       DecisionEntry[]   @relation("DecisionRecorder")
   reviewLogs      ReviewLog[]
-  triggerEvents   TriggerEvent[]  @relation("EventLogger")
+  triggerEvents   TriggerEvent[]    @relation("EventLogger")
   issues          UnresolvedIssue[] @relation("IssueRaiser")
 }
 
@@ -35,34 +35,37 @@ model Workspace {
   createdAt     DateTime @default(now())
   updatedAt     DateTime @updatedAt
 
-  owner           User              @relation("WorkspaceOwner", fields: [ownerId], references: [id])
-  members         User[]
-  careRecipient   CareRecipient?
-  contacts        Contact[]
-  domains         Domain[]
-  documents       Document[]
-  tasks           Task[]
-  decisions       DecisionEntry[]
-  triggerEvents   TriggerEvent[]
-  reviewLogs      ReviewLog[]
-  expenseEntries  ExpenseEntry[]
-  incomeOffsets   IncomeOffset[]
-  familyMeetings  FamilyMeeting[]
+  owner            User              @relation("WorkspaceOwner", fields: [ownerId], references: [id])
+  members          User[]
+  careRecipient    CareRecipient?
+  contacts         Contact[]
+  domains          Domain[]
+  documents        Document[]
+  tasks            Task[]
+  decisions        DecisionEntry[]
+  triggerEvents    TriggerEvent[]
+  reviewLogs       ReviewLog[]
+  expenseEntries   ExpenseEntry[]
+  incomeOffsets    IncomeOffset[]
+  familyMeetings   FamilyMeeting[]
   unresolvedIssues UnresolvedIssue[]
-  timelineEvents  TimelineEvent[]
+  timelineEvents   TimelineEvent[]
   structuredRecords StructuredRecord[]
 }
 
 model CareRecipient {
-  id               String   @id @default(cuid())
-  workspaceId      String   @unique
-  fullLegalName    String
-  dateOfBirth      String?
-  careSettingType  String   @default("home")
-  conditionContext String?
-  knownAllergies   String?
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  id                    String   @id @default(cuid())
+  workspaceId           String   @unique
+  fullLegalName         String
+  dateOfBirth           String?
+  careSettingType       String   @default("home")
+  conditionContext      String?
+  knownAllergies        String?
+  emergencyContacts     String?
+  primaryPhysicianName  String?
+  primaryPhysicianPhone String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
 
   workspace Workspace @relation(fields: [workspaceId], references: [id])
 }
@@ -93,13 +96,13 @@ model Domain {
   createdAt       DateTime  @default(now())
   updatedAt       DateTime  @updatedAt
 
-  workspace       Workspace       @relation(fields: [workspaceId], references: [id])
-  owner           User?           @relation("DomainOwner", fields: [ownerId], references: [id])
-  documents       Document[]
-  tasks           Task[]
-  decisions       DecisionEntry[]
-  reviewLogs      ReviewLog[]
-  timelineEvents  TimelineEvent[]
+  workspace         Workspace         @relation(fields: [workspaceId], references: [id])
+  owner             User?             @relation("DomainOwner", fields: [ownerId], references: [id])
+  documents         Document[]
+  tasks             Task[]
+  decisions         DecisionEntry[]
+  reviewLogs        ReviewLog[]
+  timelineEvents    TimelineEvent[]
   structuredRecords StructuredRecord[]
 
   @@unique([workspaceId, domainKey])
@@ -151,16 +154,19 @@ model StructuredRecord {
 }
 
 model Task {
-  id          String    @id @default(cuid())
-  workspaceId String
-  domainId    String?
-  title       String
+  id           String    @id @default(cuid())
+  workspaceId  String
+  domainId     String?
+  title        String
+  description  String?
   assignedToId String?
-  dueDate     DateTime?
-  status      String    @default("open")
-  sourceType  String    @default("manual")
-  createdAt   DateTime  @default(now())
-  updatedAt   DateTime  @updatedAt
+  dueDate      DateTime?
+  status       String    @default("open")
+  sourceType   String    @default("manual")
+  sourceId     String?
+  completedAt  DateTime?
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
 
   workspace  Workspace @relation(fields: [workspaceId], references: [id])
   domain     Domain?   @relation(fields: [domainId], references: [id])
@@ -168,13 +174,13 @@ model Task {
 }
 
 model TriggerEvent {
-  id          String   @id @default(cuid())
-  workspaceId String
+  id           String   @id @default(cuid())
+  workspaceId  String
   eventTypeKey String
-  eventDate   DateTime
-  description String?
-  loggedById  String?
-  createdAt   DateTime @default(now())
+  eventDate    DateTime
+  description  String?
+  loggedById   String?
+  createdAt    DateTime @default(now())
 
   workspace Workspace @relation(fields: [workspaceId], references: [id])
   loggedBy  User?     @relation("EventLogger", fields: [loggedById], references: [id])
@@ -198,12 +204,12 @@ model DecisionEntry {
 }
 
 model ReviewLog {
-  id          String   @id @default(cuid())
-  workspaceId String
-  domainId    String
+  id           String   @id @default(cuid())
+  workspaceId  String
+  domainId     String
   reviewedById String?
-  reviewedAt  DateTime @default(now())
-  notes       String?
+  reviewedAt   DateTime @default(now())
+  notes        String?
 
   workspace  Workspace @relation(fields: [workspaceId], references: [id])
   domain     Domain    @relation(fields: [domainId], references: [id])
@@ -241,7 +247,7 @@ model FamilyMeeting {
   id           String   @id @default(cuid())
   workspaceId  String
   meetingDate  DateTime
-  participants String   @default("[]")
+  participants String   @default("")
   agenda       String?
   notes        String?
   createdAt    DateTime @default(now())
@@ -251,14 +257,15 @@ model FamilyMeeting {
 }
 
 model UnresolvedIssue {
-  id          String   @id @default(cuid())
-  workspaceId String
-  description String
-  category    String?
-  status      String   @default("open")
-  raisedById  String?
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  id              String   @id @default(cuid())
+  workspaceId     String
+  description     String
+  category        String?
+  status          String   @default("open")
+  resolutionNotes String?
+  raisedById      String?
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
   workspace Workspace @relation(fields: [workspaceId], references: [id])
   raisedBy  User?     @relation("IssueRaiser", fields: [raisedById], references: [id])
