@@ -108,6 +108,11 @@ export default function FundingPage() {
     setSubmitting(false)
   }
 
+  const handleDeleteExpense = async (id: string) => {
+    const res = await fetch(`/api/expenses/${id}`, { method: 'DELETE' })
+    if (res.ok) setExpenses(expenses.filter((expense) => expense.id !== id))
+  }
+
   const handleAddIncome = async () => {
     if (!incomeForm.sourceName || !incomeForm.monthlyAmount) return
     setSubmitting(true)
@@ -287,6 +292,13 @@ export default function FundingPage() {
                       <p className="text-xs text-slate-400">{fmt(toMonthly(exp.amount, exp.frequency))}/mo</p>
                     )}
                   </div>
+                  <button
+                    onClick={() => handleDeleteExpense(exp.id)}
+                    className="text-xs text-red-600 hover:underline"
+                    aria-label={`Delete ${exp.category}`}
+                  >
+                    Delete
+                  </button>
                 </div>
               ))}
               <div className="flex items-center justify-between p-3 bg-slate-50 font-medium">

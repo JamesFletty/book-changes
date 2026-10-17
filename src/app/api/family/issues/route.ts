@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server'
-import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { requireFamily } from '@/lib/api'
 
 export async function GET() {
-  const session = await auth()
-  if (!session?.user?.workspaceId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const family = await requireFamily()
+  if (!family.ok) return family.response
 
   const issues = await prisma.unresolvedIssue.findMany({
-    where: { workspaceId: session.user.workspaceId },
+    where: { workspaceId: family.workspaceId },
     include: { raisedBy: { select: { name: true, email: true } } },
     orderBy: { createdAt: 'desc' },
   })
@@ -16,8 +16,8 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const session = await auth()
-  if (!session?.user?.workspaceId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const family = await requireFamily()
+  if (!family.ok) return family.response
 
   const body = await req.json()
   const { description, category } = body
@@ -26,11 +26,11 @@ export async function POST(req: Request) {
 
   const issue = await prisma.unresolvedIssue.create({
     data: {
-      workspaceId: session.user.workspaceId,
+      workspaceId: family.workspaceId,
       description,
       category,
       status: 'open',
-      raisedById: session.user.id,
+      raisedById: family.userId,
     },
     include: { raisedBy: { select: { name: true, email: true } } },
   })

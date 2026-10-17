@@ -1,13 +1,13 @@
 import { NextResponse } from 'next/server'
-import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { requireFamily } from '@/lib/api'
 
 export async function GET() {
-  const session = await auth()
-  if (!session?.user?.workspaceId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const family = await requireFamily()
+  if (!family.ok) return family.response
 
   const meetings = await prisma.familyMeeting.findMany({
-    where: { workspaceId: session.user.workspaceId },
+    where: { workspaceId: family.workspaceId },
     orderBy: { meetingDate: 'desc' },
   })
 
@@ -15,16 +15,22 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const session = await auth()
-  if (!session?.user?.workspaceId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const family = await requireFamily()
+  if (!family.ok) return family.response
 
   const body = await req.json()
   const { meetingDate, participants, agenda, notes } = body
 
+  if (!meetingDate) return NextResponse.json({ error: 'Meeting date required' }, { status: 400 })
+  const parsedDate = new Date(meetingDate)
+  if (Number.isNaN(parsedDate.getTime())) {
+    return NextResponse.json({ error: 'Invalid meeting date' }, { status: 400 })
+  }
+
   const meeting = await prisma.familyMeeting.create({
     data: {
-      workspaceId: session.user.workspaceId,
-      meetingDate: new Date(meetingDate),
+      workspaceId: family.workspaceId,
+      meetingDate: parsedDate,
       participants: participants || '',
       agenda,
       notes,
@@ -33,7 +39,7 @@ export async function POST(req: Request) {
 
   await prisma.timelineEvent.create({
     data: {
-      workspaceId: session.user.workspaceId,
+      workspaceId: family.workspaceId,
       eventType: 'family_meeting',
       sourceEntityType: 'family_meeting',
       sourceEntityId: meeting.id,

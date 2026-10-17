@@ -1,68 +1,83 @@
 import { NextResponse } from 'next/server'
-import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { writeFile, mkdir } from 'fs/promises'
-import { join } from 'path'
+import { requireFamily, resolveDomain, withDomainKey } from '@/lib/api'
+import { saveUpload } from '@/lib/uploads'
+
+const MAX_UPLOAD_BYTES = 15 * 1024 * 1024
 
 export async function GET(req: Request) {
-  const session = await auth()
-  if (!session?.user?.workspaceId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const family = await requireFamily()
+  if (!family.ok) return family.response
 
   const url = new URL(req.url)
   const domainKey = url.searchParams.get('domainKey')
   const critical = url.searchParams.get('critical') === 'true'
   const search = url.searchParams.get('search') || ''
 
+  const where: {
+    workspaceId: string
+    domainId?: string
+    isCritical?: boolean
+    OR?: Array<Record<string, { contains: string }>>
+  } = {
+    workspaceId: family.workspaceId,
+  }
+
+  if (domainKey) {
+    const domain = await resolveDomain(family.workspaceId, domainKey)
+    if (!domain) return NextResponse.json([])
+    where.domainId = domain.id
+  }
+  if (critical) where.isCritical = true
+  if (search) {
+    where.OR = [
+      { displayName: { contains: search } },
+      { notes: { contains: search } },
+      { physicalLocation: { contains: search } },
+    ]
+  }
+
   const documents = await prisma.document.findMany({
-    where: {
-      workspaceId: session.user.workspaceId,
-      ...(domainKey ? { domainId: domainKey } : {}),
-      ...(critical ? { isCritical: true } : {}),
-      ...(search ? {
-        OR: [
-          { displayName: { contains: search } },
-          { notes: { contains: search } },
-          { physicalLocation: { contains: search } },
-        ],
-      } : {}),
-    },
+    where,
+    include: { domain: { select: { domainKey: true } } },
     orderBy: { createdAt: 'desc' },
   })
 
-  return NextResponse.json(documents)
+  return NextResponse.json(documents.map(withDomainKey))
 }
 
 export async function POST(req: Request) {
-  const session = await auth()
-  if (!session?.user?.workspaceId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const family = await requireFamily()
+  if (!family.ok) return family.response
 
   try {
     const formData = await req.formData()
-    const file = formData.get('file') as File | null
-    const displayName = formData.get('displayName') as string
-    const documentTypeKey = formData.get('documentTypeKey') as string
-    const domainKey = formData.get('domainKey') as string
+    const file = formData.get('file')
+    const displayName = String(formData.get('displayName') || '')
+    const documentTypeKey = String(formData.get('documentTypeKey') || '')
+    const domainKey = String(formData.get('domainKey') || '')
     const isCritical = formData.get('isCritical') === 'true'
-    const physicalLocation = formData.get('physicalLocation') as string || null
-    const notes = formData.get('notes') as string || null
+    const physicalLocation = String(formData.get('physicalLocation') || '') || null
+    const notes = String(formData.get('notes') || '') || null
 
-    if (!file || !documentTypeKey || !domainKey) {
+    if (!(file instanceof File) || !documentTypeKey || !domainKey) {
       return NextResponse.json({ error: 'File, document type, and domain are required' }, { status: 400 })
     }
 
-    // Save file to disk
-    const bytes = await file.arrayBuffer()
-    const buffer = Buffer.from(bytes)
-    const uploadsDir = join(process.cwd(), 'public', 'uploads', session.user.workspaceId)
-    await mkdir(uploadsDir, { recursive: true })
-    const fileName = `${Date.now()}-${file.name.replace(/[^a-zA-Z0-9._-]/g, '_')}`
-    const filePath = join(uploadsDir, fileName)
-    await writeFile(filePath, buffer)
+    if (file.size > MAX_UPLOAD_BYTES) {
+      return NextResponse.json({ error: 'File is larger than 15 MB' }, { status: 400 })
+    }
+
+    const domain = await resolveDomain(family.workspaceId, domainKey)
+    if (!domain) return NextResponse.json({ error: 'Domain not found' }, { status: 400 })
+
+    const bytes = Buffer.from(await file.arrayBuffer())
+    const saved = await saveUpload(family.workspaceId, file.name, bytes)
 
     const document = await prisma.document.create({
       data: {
-        workspaceId: session.user.workspaceId,
-        domainId: domainKey,
+        workspaceId: family.workspaceId,
+        domainId: domain.id,
         documentTypeKey,
         displayName: displayName || file.name,
         isCritical,
@@ -71,32 +86,36 @@ export async function POST(req: Request) {
       },
     })
 
-    // Create a version record
-    await prisma.documentVersion.create({
+    const version = await prisma.documentVersion.create({
       data: {
         documentId: document.id,
         fileName: file.name,
         fileSize: file.size,
-        fileType: file.type,
-        filePath: `/uploads/${session.user.workspaceId}/${fileName}`,
+        fileType: file.type || null,
+        filePath: saved.relativePath,
         versionNumber: 1,
       },
     })
 
-    // Log timeline event
+    const updated = await prisma.document.update({
+      where: { id: document.id },
+      data: { currentVersionId: version.id },
+      include: { domain: { select: { domainKey: true } } },
+    })
+
     await prisma.timelineEvent.create({
       data: {
-        workspaceId: session.user.workspaceId,
+        workspaceId: family.workspaceId,
         eventType: 'document_upload',
         sourceEntityType: 'document',
         sourceEntityId: document.id,
-        domainId: domainKey,
-        summary: `Uploaded: ${document.displayName}`,
+        domainId: domain.id,
+        summary: `Uploaded: ${updated.displayName}`,
         eventDate: new Date(),
       },
     })
 
-    return NextResponse.json(document, { status: 201 })
+    return NextResponse.json(withDomainKey(updated), { status: 201 })
   } catch (error) {
     console.error('Document upload error:', error)
     return NextResponse.json({ error: 'Upload failed' }, { status: 500 })

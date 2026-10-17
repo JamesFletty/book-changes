@@ -1,68 +1,87 @@
 import { NextResponse } from 'next/server'
-import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { requireFamily } from '@/lib/api'
+
+const CARE_RECIPIENT_FIELDS = [
+  'fullLegalName',
+  'dateOfBirth',
+  'careSettingType',
+  'conditionContext',
+  'knownAllergies',
+  'emergencyContacts',
+  'primaryPhysicianName',
+  'primaryPhysicianPhone',
+] as const
+
+function pickCareRecipientFields(body: Record<string, unknown>) {
+  const data: Record<string, string | null> = {}
+  for (const field of CARE_RECIPIENT_FIELDS) {
+    if (body[field] !== undefined) {
+      const value = body[field]
+      data[field] = value === null || value === '' ? null : String(value)
+    }
+  }
+  return data
+}
 
 export async function GET() {
-  const session = await auth()
-  if (!session?.user?.workspaceId) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  const family = await requireFamily()
+  if (!family.ok) return family.response
 
   const careRecipient = await prisma.careRecipient.findUnique({
-    where: { workspaceId: session.user.workspaceId },
+    where: { workspaceId: family.workspaceId },
   })
 
   return NextResponse.json(careRecipient)
 }
 
 export async function POST(req: Request) {
-  const session = await auth()
-  if (!session?.user?.workspaceId) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  const family = await requireFamily()
+  if (!family.ok) return family.response
 
   try {
     const body = await req.json()
-    const {
-      fullLegalName, dateOfBirth, careSettingType, conditionContext, knownAllergies,
-      emergencyContactName, emergencyContactPhone, emergencyContactRelationship,
-    } = body
-
+    const fullLegalName = typeof body.fullLegalName === 'string' ? body.fullLegalName.trim() : ''
     if (!fullLegalName) {
       return NextResponse.json({ error: 'Full legal name is required' }, { status: 400 })
     }
 
-    // Build emergency contacts JSON from onboarding fields
     let emergencyContacts = '[]'
-    if (emergencyContactName) {
+    if (typeof body.emergencyContactName === 'string' && body.emergencyContactName.trim()) {
       emergencyContacts = JSON.stringify([{
-        name: emergencyContactName,
-        phone: emergencyContactPhone || '',
-        relationship: emergencyContactRelationship || '',
+        name: body.emergencyContactName.trim(),
+        phone: typeof body.emergencyContactPhone === 'string' ? body.emergencyContactPhone : '',
+        relationship: typeof body.emergencyContactRelationship === 'string' ? body.emergencyContactRelationship : '',
       }])
+    } else if (typeof body.emergencyContacts === 'string') {
+      emergencyContacts = body.emergencyContacts
+    }
+
+    const data = {
+      fullLegalName,
+      dateOfBirth: body.dateOfBirth ? String(body.dateOfBirth) : null,
+      careSettingType: body.careSettingType ? String(body.careSettingType) : 'home',
+      conditionContext: body.conditionContext ? String(body.conditionContext) : null,
+      knownAllergies: body.knownAllergies ? String(body.knownAllergies) : null,
+      emergencyContacts,
     }
 
     const existing = await prisma.careRecipient.findUnique({
-      where: { workspaceId: session.user.workspaceId },
+      where: { workspaceId: family.workspaceId },
     })
 
     if (existing) {
       const updated = await prisma.careRecipient.update({
-        where: { workspaceId: session.user.workspaceId },
-        data: { fullLegalName, dateOfBirth, careSettingType, conditionContext, knownAllergies, emergencyContacts },
+        where: { workspaceId: family.workspaceId },
+        data,
       })
       return NextResponse.json(updated)
     }
 
     const careRecipient = await prisma.careRecipient.create({
       data: {
-        workspaceId: session.user.workspaceId,
-        fullLegalName,
-        dateOfBirth,
-        careSettingType: careSettingType || 'home',
-        conditionContext,
-        knownAllergies,
-        emergencyContacts,
+        workspaceId: family.workspaceId,
+        ...data,
       },
     })
 
@@ -74,16 +93,26 @@ export async function POST(req: Request) {
 }
 
 export async function PUT(req: Request) {
-  const session = await auth()
-  if (!session?.user?.workspaceId) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  const family = await requireFamily()
+  if (!family.ok) return family.response
 
   try {
     const body = await req.json()
+    const data = pickCareRecipientFields(body)
+    if (Object.keys(data).length === 0) {
+      return NextResponse.json({ error: 'No valid fields to update' }, { status: 400 })
+    }
+
+    const existing = await prisma.careRecipient.findUnique({
+      where: { workspaceId: family.workspaceId },
+    })
+    if (!existing) {
+      return NextResponse.json({ error: 'Not found' }, { status: 404 })
+    }
+
     const updated = await prisma.careRecipient.update({
-      where: { workspaceId: session.user.workspaceId },
-      data: body,
+      where: { workspaceId: family.workspaceId },
+      data,
     })
     return NextResponse.json(updated)
   } catch (error) {

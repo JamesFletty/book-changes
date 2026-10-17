@@ -1,59 +1,87 @@
 import { NextResponse } from 'next/server'
-import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { requireFamily, resolveDomain, withDomainKey } from '@/lib/api'
 
 export async function GET(req: Request) {
-  const session = await auth()
-  if (!session?.user?.workspaceId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const family = await requireFamily()
+  if (!family.ok) return family.response
 
   const url = new URL(req.url)
   const domainKey = url.searchParams.get('domainKey')
 
+  const where: { workspaceId: string; domainId?: string } = {
+    workspaceId: family.workspaceId,
+  }
+
+  if (domainKey) {
+    const domain = await resolveDomain(family.workspaceId, domainKey)
+    if (!domain) return NextResponse.json([])
+    where.domainId = domain.id
+  }
+
   const decisions = await prisma.decisionEntry.findMany({
-    where: {
-      workspaceId: session.user.workspaceId,
-      ...(domainKey ? { domainId: domainKey } : {}),
+    where,
+    include: {
+      recordedBy: { select: { name: true, email: true } },
+      domain: { select: { domainKey: true } },
     },
-    include: { recordedBy: { select: { name: true, email: true } } },
     orderBy: { decisionDate: 'desc' },
   })
 
-  return NextResponse.json(decisions)
+  return NextResponse.json(decisions.map(withDomainKey))
 }
 
 export async function POST(req: Request) {
-  const session = await auth()
-  if (!session?.user?.workspaceId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const family = await requireFamily()
+  if (!family.ok) return family.response
 
   const body = await req.json()
-  const { description, rationale, participants, domainKey, decisionDate } = body
+  const description = typeof body.description === 'string' ? body.description.trim() : ''
+  const rationale = typeof body.rationale === 'string' ? body.rationale : null
+  const participants = typeof body.participants === 'string' ? body.participants : null
+  const domainKey = typeof body.domainKey === 'string' ? body.domainKey : ''
 
   if (!description) return NextResponse.json({ error: 'Description required' }, { status: 400 })
 
+  let domainId: string | null = null
+  if (domainKey) {
+    const domain = await resolveDomain(family.workspaceId, domainKey)
+    if (!domain) return NextResponse.json({ error: 'Domain not found' }, { status: 400 })
+    domainId = domain.id
+  }
+
+  const decisionDate = body.decisionDate ? new Date(body.decisionDate) : new Date()
+  if (Number.isNaN(decisionDate.getTime())) {
+    return NextResponse.json({ error: 'Invalid decision date' }, { status: 400 })
+  }
+
   const decision = await prisma.decisionEntry.create({
     data: {
-      workspaceId: session.user.workspaceId,
+      workspaceId: family.workspaceId,
       description,
       rationale,
       participants,
-      domainId: domainKey || null,
-      decisionDate: decisionDate ? new Date(decisionDate) : new Date(),
-      recordedById: session.user.id,
+      domainId,
+      decisionDate,
+      recordedById: family.userId,
     },
-    include: { recordedBy: { select: { name: true, email: true } } },
+    include: {
+      recordedBy: { select: { name: true, email: true } },
+      domain: { select: { domainKey: true } },
+    },
   })
 
   await prisma.timelineEvent.create({
     data: {
-      workspaceId: session.user.workspaceId,
+      workspaceId: family.workspaceId,
       eventType: 'decision',
       sourceEntityType: 'decision',
       sourceEntityId: decision.id,
-      domainId: domainKey || null,
+      domainId,
       summary: `Decision recorded: ${description.slice(0, 100)}${description.length > 100 ? '...' : ''}`,
-      eventDate: new Date(decision.decisionDate),
+      eventDate: decision.decisionDate,
     },
   })
 
-  return NextResponse.json(decision, { status: 201 })
+  return NextResponse.json(withDomainKey(decision), { status: 201 })
 }

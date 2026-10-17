@@ -1,0 +1,25 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    env:
+      DATABASE_URL: file:/tmp/caregiver-ci.db
+      AUTH_SECRET: ci-auth-secret-ci-auth-secret-32chars
+      AUTH_TRUST_HOST: "true"
+      UPLOAD_DIR: /tmp/caregiver-uploads
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - run: npx prisma db push --accept-data-loss
+      - run: npm run lint
+      - run: npm test
+      - run: npm run build

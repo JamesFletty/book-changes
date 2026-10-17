@@ -1,16 +1,16 @@
 import { NextResponse } from 'next/server'
-import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { CASCADE_RULES } from '@/lib/cascade-rules'
 import { TRIGGER_EVENT_TYPES, DOMAINS } from '@/lib/constants'
 import { addDays } from 'date-fns'
+import { requireFamily } from '@/lib/api'
 
-export async function GET(req: Request) {
-  const session = await auth()
-  if (!session?.user?.workspaceId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+export async function GET() {
+  const family = await requireFamily()
+  if (!family.ok) return family.response
 
   const events = await prisma.triggerEvent.findMany({
-    where: { workspaceId: session.user.workspaceId },
+    where: { workspaceId: family.workspaceId },
     include: { loggedBy: { select: { name: true, email: true } } },
     orderBy: { eventDate: 'desc' },
   })
@@ -19,58 +19,58 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const session = await auth()
-  if (!session?.user?.workspaceId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const family = await requireFamily()
+  if (!family.ok) return family.response
 
   const body = await req.json()
-  const { eventTypeKey, eventDate, description } = body
+  const eventTypeKey = typeof body.eventTypeKey === 'string' ? body.eventTypeKey : ''
+  const description = typeof body.description === 'string' ? body.description : null
 
   if (!eventTypeKey) return NextResponse.json({ error: 'Event type required' }, { status: 400 })
+
+  const eventDate = body.eventDate ? new Date(body.eventDate) : new Date()
+  if (Number.isNaN(eventDate.getTime())) {
+    return NextResponse.json({ error: 'Invalid event date' }, { status: 400 })
+  }
 
   const eventTypeDef = TRIGGER_EVENT_TYPES.find((t) => t.key === eventTypeKey)
   const eventLabel = eventTypeDef?.label || eventTypeKey
 
   const event = await prisma.triggerEvent.create({
     data: {
-      workspaceId: session.user.workspaceId,
+      workspaceId: family.workspaceId,
       eventTypeKey,
-      eventDate: eventDate ? new Date(eventDate) : new Date(),
+      eventDate,
       description,
-      loggedById: session.user.id,
+      loggedById: family.userId,
     },
   })
 
-  // Log to timeline
   await prisma.timelineEvent.create({
     data: {
-      workspaceId: session.user.workspaceId,
+      workspaceId: family.workspaceId,
       eventType: 'trigger_event',
       sourceEntityType: 'trigger_event',
       sourceEntityId: event.id,
       summary: `Event logged: ${eventLabel}${description ? ` — ${description}` : ''}`,
-      eventDate: new Date(event.eventDate),
+      eventDate,
     },
   })
 
-  // Generate cascade tasks
   const rules = CASCADE_RULES[eventTypeKey] || []
   const cascadeTasks: { title: string; domain: string }[] = []
 
   for (const rule of rules) {
-    // Find the domain record for this workspace
     const domain = await prisma.domain.findFirst({
-      where: { workspaceId: session.user.workspaceId, domainKey: rule.domainKey },
+      where: { workspaceId: family.workspaceId, domainKey: rule.domainKey },
     })
-
-    const taskTitle = `[${eventLabel}] ${rule.task}`
-    const dueDate = addDays(new Date(event.eventDate), rule.daysToComplete)
 
     await prisma.task.create({
       data: {
-        workspaceId: session.user.workspaceId,
-        title: taskTitle,
-        domainId: rule.domainKey,
-        dueDate,
+        workspaceId: family.workspaceId,
+        title: `[${eventLabel}] ${rule.task}`,
+        domainId: domain?.id ?? null,
+        dueDate: addDays(eventDate, rule.daysToComplete),
         status: 'open',
         sourceType: 'trigger_event',
         sourceId: event.id,

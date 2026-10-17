@@ -1,21 +1,18 @@
 import { NextResponse } from 'next/server'
-import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { isWorkspaceMember, requireFamily } from '@/lib/api'
 
-export async function GET(
-  req: Request,
-  { params }: { params: { domainId: string } }
-) {
-  const session = await auth()
-  if (!session?.user?.workspaceId) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+type RouteContext = { params: Promise<{ domainId: string }> }
 
-  // Support lookup by both UUID and domainKey
+export async function GET(_req: Request, { params }: RouteContext) {
+  const family = await requireFamily()
+  if (!family.ok) return family.response
+
+  const { domainId } = await params
   const domain = await prisma.domain.findFirst({
     where: {
-      workspaceId: session.user.workspaceId,
-      OR: [{ id: params.domainId }, { domainKey: params.domainId }],
+      workspaceId: family.workspaceId,
+      OR: [{ id: domainId }, { domainKey: domainId }],
     },
     include: {
       owner: { select: { id: true, name: true, email: true } },
@@ -29,36 +26,42 @@ export async function GET(
   return NextResponse.json(domain)
 }
 
-export async function PUT(
-  req: Request,
-  { params }: { params: { domainId: string } }
-) {
-  const session = await auth()
-  if (!session?.user?.workspaceId) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+export async function PUT(req: Request, { params }: RouteContext) {
+  const family = await requireFamily()
+  if (!family.ok) return family.response
 
   try {
+    const { domainId } = await params
     const body = await req.json()
     const { ownerId, status, reviewCadence } = body
 
-    await prisma.domain.updateMany({
+    if (ownerId) {
+      const member = await isWorkspaceMember(family.workspaceId, ownerId)
+      if (!member) {
+        return NextResponse.json({ error: 'Owner must belong to this family' }, { status: 400 })
+      }
+    }
+
+    const existing = await prisma.domain.findFirst({
       where: {
-        workspaceId: session.user.workspaceId,
-        OR: [{ id: params.domainId }, { domainKey: params.domainId }],
+        workspaceId: family.workspaceId,
+        OR: [{ id: domainId }, { domainKey: domainId }],
       },
+      select: { id: true },
+    })
+    if (!existing) return NextResponse.json({ error: 'Not found' }, { status: 404 })
+
+    await prisma.domain.update({
+      where: { id: existing.id },
       data: {
-        ...(ownerId !== undefined && { ownerId }),
+        ...(ownerId !== undefined && { ownerId: ownerId || null }),
         ...(status !== undefined && { status }),
         ...(reviewCadence !== undefined && { reviewCadence }),
       },
     })
 
     const updated = await prisma.domain.findFirst({
-      where: {
-        workspaceId: session.user.workspaceId,
-        OR: [{ id: params.domainId }, { domainKey: params.domainId }],
-      },
+      where: { id: existing.id },
       include: { owner: { select: { id: true, name: true, email: true } } },
     })
 

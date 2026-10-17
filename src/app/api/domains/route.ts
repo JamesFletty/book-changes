@@ -1,15 +1,13 @@
 import { NextResponse } from 'next/server'
-import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { requireFamily } from '@/lib/api'
 
 export async function GET() {
-  const session = await auth()
-  if (!session?.user?.workspaceId) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  const family = await requireFamily()
+  if (!family.ok) return family.response
 
   const domains = await prisma.domain.findMany({
-    where: { workspaceId: session.user.workspaceId },
+    where: { workspaceId: family.workspaceId },
     include: {
       owner: {
         select: { id: true, name: true, email: true },
