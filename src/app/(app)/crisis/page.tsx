@@ -72,9 +72,15 @@ export default async function CrisisPage() {
 
   const { careRecipient, contacts, documents, docMap } = await getCrisisData(session.user.workspaceId)
 
-  const emergencyContacts = careRecipient?.emergencyContacts
-    ? JSON.parse(careRecipient.emergencyContacts as string)
-    : []
+  let emergencyContacts: Array<{ name?: string; phone?: string; relationship?: string }> = []
+  if (careRecipient?.emergencyContacts) {
+    try {
+      const parsed = JSON.parse(careRecipient.emergencyContacts)
+      if (Array.isArray(parsed)) emergencyContacts = parsed
+    } catch {
+      emergencyContacts = []
+    }
+  }
 
   const poaFinancial = docMap['poa_financial']
   const poaHealthcare = docMap['poa_healthcare']
@@ -176,7 +182,7 @@ export default async function CrisisPage() {
               actionLabel="Add contacts"
             />
           ) : (
-            emergencyContacts.map((c: { name: string; phone: string; relationship: string }, i: number) => (
+            emergencyContacts.map((c, i) => (
               <PacketItem
                 key={i}
                 label={c.relationship || 'Contact'}

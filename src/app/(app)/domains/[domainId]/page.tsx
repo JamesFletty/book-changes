@@ -127,12 +127,18 @@ export default function DomainWorkspacePage() {
   }
 
   const handleCompleteTask = async (taskId: string) => {
-    await fetch(`/api/tasks/${taskId}`, {
+    const res = await fetch(`/api/tasks/${taskId}`, {
       method: 'PUT',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: 'complete' }),
     })
-    setTasks(tasks.filter((t) => t.id !== taskId))
+    if (res.ok) setTasks(tasks.filter((t) => t.id !== taskId))
+  }
+
+  const handleDeleteTask = async (taskId: string) => {
+    if (!window.confirm('Delete this task?')) return
+    const res = await fetch(`/api/tasks/${taskId}`, { method: 'DELETE' })
+    if (res.ok) setTasks(tasks.filter((t) => t.id !== taskId))
   }
 
   if (!domainDef) return <div className="p-6 text-slate-500">Domain not found.</div>
@@ -453,6 +459,9 @@ export default function DomainWorkspacePage() {
                       )}
                     </div>
                   </div>
+                  <button onClick={() => handleDeleteTask(task.id)} className="text-xs text-red-600 hover:underline">
+                    Delete
+                  </button>
                 </div>
               ))}
             </div>

@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server'
-import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
-import { addMonths, addWeeks } from 'date-fns'
+import { addMonths } from 'date-fns'
+import { requireFamily } from '@/lib/api'
 
 function getNextReviewDate(cadence: string): Date {
   const now = new Date()
@@ -14,15 +14,21 @@ function getNextReviewDate(cadence: string): Date {
   }
 }
 
-export async function POST(req: Request, { params }: { params: { domainId: string } }) {
-  const session = await auth()
-  if (!session?.user?.workspaceId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+type RouteContext = { params: Promise<{ domainId: string }> }
 
+export async function POST(req: Request, { params }: RouteContext) {
+  const family = await requireFamily()
+  if (!family.ok) return family.response
+
+  const { domainId } = await params
   const body = await req.json().catch(() => ({}))
-  const { notes } = body
+  const notes = typeof body.notes === 'string' ? body.notes : null
 
   const domain = await prisma.domain.findFirst({
-    where: { workspaceId: session.user.workspaceId, domainKey: params.domainId },
+    where: {
+      workspaceId: family.workspaceId,
+      OR: [{ id: domainId }, { domainKey: domainId }],
+    },
   })
 
   if (!domain) return NextResponse.json({ error: 'Domain not found' }, { status: 404 })
@@ -42,20 +48,20 @@ export async function POST(req: Request, { params }: { params: { domainId: strin
     }),
     prisma.reviewLog.create({
       data: {
-        workspaceId: session.user.workspaceId,
+        workspaceId: family.workspaceId,
         domainId: domain.id,
-        reviewedById: session.user.id,
+        reviewedById: family.userId,
         reviewedAt: now,
         notes,
       },
     }),
     prisma.timelineEvent.create({
       data: {
-        workspaceId: session.user.workspaceId,
+        workspaceId: family.workspaceId,
         eventType: 'review_complete',
         sourceEntityType: 'domain',
         sourceEntityId: domain.id,
-        domainId: domain.domainKey,
+        domainId: domain.id,
         summary: `Domain reviewed: ${domain.domainKey.replace(/_/g, ' ')}`,
         eventDate: now,
       },

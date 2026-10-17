@@ -2,13 +2,23 @@ import { NextResponse } from 'next/server'
 import bcrypt from 'bcryptjs'
 import { prisma } from '@/lib/prisma'
 
+function normalizeEmail(email: unknown) {
+  return typeof email === 'string' ? email.trim().toLowerCase() : ''
+}
+
 export async function POST(req: Request) {
   try {
     const body = await req.json()
-    const { name, email, password } = body
+    const name = typeof body.name === 'string' ? body.name.trim() : ''
+    const email = normalizeEmail(body.email)
+    const password = typeof body.password === 'string' ? body.password : ''
 
     if (!email || !password) {
       return NextResponse.json({ error: 'Email and password are required' }, { status: 400 })
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return NextResponse.json({ error: 'Enter a valid email address' }, { status: 400 })
     }
 
     if (password.length < 8) {

@@ -21,6 +21,16 @@ import { Button } from '@/components/ui/button'
 import { DOMAINS, DOMAIN_STATUS_CONFIG } from '@/lib/constants'
 import { formatDistanceToNow } from 'date-fns'
 
+function hasEmergencyContacts(value: string | null | undefined) {
+  if (!value) return false
+  try {
+    const parsed = JSON.parse(value)
+    return Array.isArray(parsed) && parsed.some((contact) => contact && typeof contact.name === 'string' && contact.name.trim())
+  } catch {
+    return false
+  }
+}
+
 async function getDashboardData(workspaceId: string) {
   const [
     workspace,
@@ -38,14 +48,16 @@ async function getDashboardData(workspaceId: string) {
     }),
     prisma.task.findMany({
       where: { workspaceId, status: 'open' },
-      include: { assignedTo: { select: { name: true, email: true } } },
+      include: {
+        assignedTo: { select: { name: true, email: true } },
+        domain: { select: { domainKey: true } },
+      },
       orderBy: [{ dueDate: 'asc' }, { createdAt: 'desc' }],
       take: 10,
     }),
     prisma.document.findMany({
       where: { workspaceId },
       orderBy: { createdAt: 'desc' },
-      take: 5,
     }),
     prisma.careRecipient.findUnique({ where: { workspaceId } }),
     prisma.timelineEvent.findMany({
@@ -63,13 +75,14 @@ async function getDashboardData(workspaceId: string) {
   const criticalDocTypes = ['poa_financial', 'poa_healthcare', 'living_will', 'dnr', 'insurance_card', 'medicare_card', 'medication_list']
   const uploadedDocTypes = new Set(documents.map((d) => d.documentTypeKey))
   const missingCritical = criticalDocTypes.filter((t) => !uploadedDocTypes.has(t))
+  const recentDocuments = documents.slice(0, 5)
 
   const now = new Date()
   const overdueReviews = domains.filter(
     (d) => d.nextReviewDueAt && new Date(d.nextReviewDueAt) < now
   )
 
-  return { workspace, domains, tasks, documents, careRecipient, timelineEvents, triggerEvents, missingCritical, overdueReviews }
+  return { workspace, domains, tasks, documents, recentDocuments, careRecipient, timelineEvents, triggerEvents, missingCritical, overdueReviews }
 }
 
 export default async function DashboardPage() {
@@ -77,10 +90,10 @@ export default async function DashboardPage() {
   if (!session?.user?.workspaceId) redirect('/onboarding')
 
   const {
-    workspace,
     domains,
     tasks,
     documents,
+    recentDocuments,
     careRecipient,
     timelineEvents,
     missingCritical,
@@ -89,7 +102,7 @@ export default async function DashboardPage() {
 
   const emergencyPacketItems = [
     { key: 'name', label: 'Care recipient name', done: !!careRecipient?.fullLegalName },
-    { key: 'contacts', label: 'Emergency contacts', done: !!careRecipient?.emergencyContacts },
+    { key: 'contacts', label: 'Emergency contacts', done: hasEmergencyContacts(careRecipient?.emergencyContacts) },
     { key: 'poa_financial', label: 'POA (Financial) uploaded', done: documents.some((d) => d.documentTypeKey === 'poa_financial') },
     { key: 'poa_healthcare', label: 'POA (Healthcare) uploaded', done: documents.some((d) => d.documentTypeKey === 'poa_healthcare') },
     { key: 'directives', label: 'Advance directive uploaded', done: documents.some((d) => d.documentTypeKey === 'living_will') },
@@ -189,7 +202,7 @@ export default async function DashboardPage() {
               ) : (
                 <div className="divide-y divide-slate-100">
                   {tasks.map((task) => {
-                    const domain = DOMAINS.find((d) => d.key === task.domainId)
+                    const domain = DOMAINS.find((d) => d.key === task.domain?.domainKey)
                     const isOverdue = task.dueDate && new Date(task.dueDate) < new Date()
                     return (
                       <div key={task.id} className="flex items-start gap-3 py-3">
@@ -303,7 +316,7 @@ export default async function DashboardPage() {
               </div>
             </CardHeader>
             <CardContent>
-              {documents.length === 0 ? (
+              {recentDocuments.length === 0 ? (
                 <div className="text-center py-6">
                   <FileText className="h-8 w-8 mx-auto mb-2 text-slate-300" />
                   <p className="text-xs text-slate-500">No documents yet</p>
@@ -315,7 +328,7 @@ export default async function DashboardPage() {
                 </div>
               ) : (
                 <div className="space-y-2">
-                  {documents.map((doc) => (
+                  {recentDocuments.map((doc) => (
                     <div key={doc.id} className="flex items-center gap-2 text-sm">
                       <FileText className="h-4 w-4 text-slate-400 flex-shrink-0" />
                       <span className="truncate text-slate-700">{doc.displayName}</span>

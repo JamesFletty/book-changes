@@ -18,6 +18,7 @@ interface Document {
   displayName: string
   documentTypeKey: string
   domainId: string | null
+  domainKey: string | null
   isCritical: boolean
   physicalLocation: string | null
   notes: string | null
@@ -43,9 +44,9 @@ export default function DocumentsPage() {
     file: null as File | null,
   })
   const [uploading, setUploading] = useState(false)
+  const [uploadError, setUploadError] = useState('')
 
   const loadDocuments = useCallback(async () => {
-    setLoading(true)
     const params = new URLSearchParams()
     if (search) params.set('search', search)
     if (filterDomain) params.set('domainKey', filterDomain)
@@ -55,11 +56,29 @@ export default function DocumentsPage() {
     setLoading(false)
   }, [search, filterDomain, filterCritical])
 
-  useEffect(() => { loadDocuments() }, [loadDocuments])
+  useEffect(() => {
+    let ignore = false
+    const params = new URLSearchParams()
+    if (search) params.set('search', search)
+    if (filterDomain) params.set('domainKey', filterDomain)
+    if (filterCritical) params.set('critical', 'true')
+    fetch(`/api/documents?${params}`)
+      .then(async (res) => {
+        if (ignore || !res.ok) return
+        setDocuments(await res.json())
+      })
+      .finally(() => {
+        if (!ignore) setLoading(false)
+      })
+    return () => {
+      ignore = true
+    }
+  }, [search, filterDomain, filterCritical])
 
   const handleUpload = async () => {
     if (!uploadData.file || !uploadData.documentTypeKey || !uploadData.domainKey) return
     setUploading(true)
+    setUploadError('')
 
     const formData = new FormData()
     formData.append('file', uploadData.file)
@@ -75,8 +94,17 @@ export default function DocumentsPage() {
       setShowUpload(false)
       setUploadData({ displayName: '', documentTypeKey: '', domainKey: '', isCritical: false, physicalLocation: '', notes: '', file: null })
       loadDocuments()
+    } else {
+      const data = await res.json().catch(() => ({}))
+      setUploadError(data.error || 'Upload failed')
     }
     setUploading(false)
+  }
+
+  const handleDelete = async (id: string) => {
+    if (!window.confirm('Delete this document? The file will be removed from your family workspace.')) return
+    const res = await fetch(`/api/documents/${id}`, { method: 'DELETE' })
+    if (res.ok) setDocuments((current) => current.filter((doc) => doc.id !== id))
   }
 
   const filteredDocs = documents.filter((doc) => {
@@ -187,6 +215,12 @@ export default function DocumentsPage() {
               </div>
             </div>
 
+            {uploadError && (
+              <div className="mt-4 rounded-md bg-red-50 p-3 text-sm text-red-700 border border-red-200">
+                {uploadError}
+              </div>
+            )}
+
             <div className="flex gap-3 mt-4">
               <Button
                 onClick={handleUpload}
@@ -255,7 +289,7 @@ export default function DocumentsPage() {
       ) : (
         <div className="border border-slate-200 rounded-lg overflow-hidden">
           {filteredDocs.map((doc, i) => {
-            const domain = DOMAINS.find((d) => d.key === doc.domainId)
+            const domain = DOMAINS.find((d) => d.key === doc.domainKey)
             const docType = DOCUMENT_TYPES.find((t) => t.key === doc.documentTypeKey)
             return (
               <div
@@ -302,6 +336,14 @@ export default function DocumentsPage() {
                     <span className="text-slate-300">·</span>
                     <span className="text-xs text-slate-400">{format(new Date(doc.createdAt), 'MMM d, yyyy')}</span>
                   </div>
+                </div>
+                <div className="flex items-center gap-3 flex-shrink-0">
+                  <a href={`/api/documents/${doc.id}/file`} className="text-xs text-indigo-600 hover:underline">
+                    Download
+                  </a>
+                  <button onClick={() => handleDelete(doc.id)} className="text-xs text-red-600 hover:underline">
+                    Delete
+                  </button>
                 </div>
               </div>
             )

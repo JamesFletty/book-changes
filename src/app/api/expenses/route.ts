@@ -1,13 +1,18 @@
 import { NextResponse } from 'next/server'
-import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
+import { requireFamily } from '@/lib/api'
 
-export async function GET(req: Request) {
-  const session = await auth()
-  if (!session?.user?.workspaceId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+function parseAmount(amount: unknown) {
+  const parsed = typeof amount === 'number' ? amount : parseFloat(String(amount ?? ''))
+  return Number.isFinite(parsed) ? parsed : null
+}
+
+export async function GET() {
+  const family = await requireFamily()
+  if (!family.ok) return family.response
 
   const expenses = await prisma.expenseEntry.findMany({
-    where: { workspaceId: session.user.workspaceId },
+    where: { workspaceId: family.workspaceId },
     orderBy: { createdAt: 'desc' },
   })
 
@@ -15,21 +20,24 @@ export async function GET(req: Request) {
 }
 
 export async function POST(req: Request) {
-  const session = await auth()
-  if (!session?.user?.workspaceId) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  const family = await requireFamily()
+  if (!family.ok) return family.response
 
   const body = await req.json()
-  const { category, amount, frequency, notes } = body
+  const category = typeof body.category === 'string' ? body.category.trim() : ''
+  const amount = parseAmount(body.amount)
 
-  if (!category || !amount) return NextResponse.json({ error: 'Category and amount required' }, { status: 400 })
+  if (!category || amount === null) {
+    return NextResponse.json({ error: 'Category and amount required' }, { status: 400 })
+  }
 
   const expense = await prisma.expenseEntry.create({
     data: {
-      workspaceId: session.user.workspaceId,
+      workspaceId: family.workspaceId,
       category,
-      amount: parseFloat(amount),
-      frequency: frequency || 'monthly',
-      notes,
+      amount,
+      frequency: typeof body.frequency === 'string' && body.frequency ? body.frequency : 'monthly',
+      notes: typeof body.notes === 'string' ? body.notes : null,
       isActive: true,
     },
   })

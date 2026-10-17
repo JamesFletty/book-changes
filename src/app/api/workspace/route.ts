@@ -1,17 +1,15 @@
 import { NextResponse } from 'next/server'
-import { auth } from '@/lib/auth'
 import { prisma } from '@/lib/prisma'
 import { DOMAINS } from '@/lib/constants'
+import { requireUser } from '@/lib/api'
 
 export async function GET() {
-  const session = await auth()
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  const authResult = await requireUser()
+  if (!authResult.ok) return authResult.response
 
   const user = await prisma.user.findUnique({
-    where: { id: session.user.id },
-    include: {
+    where: { id: authResult.userId },
+    select: {
       workspace: {
         include: {
           careRecipient: true,
@@ -24,32 +22,39 @@ export async function GET() {
 }
 
 export async function POST(req: Request) {
-  const session = await auth()
-  if (!session?.user?.id) {
-    return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-  }
+  const authResult = await requireUser()
+  if (!authResult.ok) return authResult.response
 
   try {
     const body = await req.json()
-    const { name, situationType } = body
+    const name = typeof body.name === 'string' ? body.name.trim() : ''
+    const situationType = typeof body.situationType === 'string' ? body.situationType : 'organizing'
 
     if (!name) {
       return NextResponse.json({ error: 'Workspace name is required' }, { status: 400 })
     }
 
-    // Create workspace
+    const user = await prisma.user.findUnique({
+      where: { id: authResult.userId },
+      select: { workspaceId: true },
+    })
+
+    if (user?.workspaceId) {
+      const workspace = await prisma.workspace.update({
+        where: { id: user.workspaceId },
+        data: { name, situationType },
+      })
+      return NextResponse.json(workspace)
+    }
+
     const workspace = await prisma.workspace.create({
       data: {
         name,
-        situationType: situationType || 'organizing',
-        ownerId: session.user.id,
-        members: {
-          connect: { id: session.user.id },
-        },
+        situationType,
+        ownerId: authResult.userId,
       },
     })
 
-    // Seed the 8 domains
     await prisma.domain.createMany({
       data: DOMAINS.map((d) => ({
         workspaceId: workspace.id,
@@ -58,9 +63,8 @@ export async function POST(req: Request) {
       })),
     })
 
-    // Update the user's workspaceId
     await prisma.user.update({
-      where: { id: session.user.id },
+      where: { id: authResult.userId },
       data: { workspaceId: workspace.id },
     })
 

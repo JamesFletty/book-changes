@@ -19,6 +19,7 @@ interface TimelineEvent {
   summary: string
   eventDate: string
   domainId: string | null
+  domainKey: string | null
   sourceEntityType: string | null
 }
 
@@ -55,7 +56,6 @@ export default function TimelinePage() {
   const [cascadeTasks, setCascadeTasks] = useState<{ title: string; domain: string }[]>([])
 
   const load = useCallback(async () => {
-    setLoading(true)
     const params = new URLSearchParams()
     if (filterType) params.set('type', filterType)
     const res = await fetch(`/api/timeline?${params}`)
@@ -63,7 +63,22 @@ export default function TimelinePage() {
     setLoading(false)
   }, [filterType])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    let ignore = false
+    const params = new URLSearchParams()
+    if (filterType) params.set('type', filterType)
+    fetch(`/api/timeline?${params}`)
+      .then(async (res) => {
+        if (ignore || !res.ok) return
+        setEvents(await res.json())
+      })
+      .finally(() => {
+        if (!ignore) setLoading(false)
+      })
+    return () => {
+      ignore = true
+    }
+  }, [filterType])
 
   const handleLogEvent = async () => {
     if (!eventForm.eventTypeKey) return
@@ -280,7 +295,7 @@ export default function TimelinePage() {
             {events.map((event) => {
               const config = EVENT_TYPE_CONFIG[event.eventType] || EVENT_TYPE_CONFIG.default
               const Icon = config.icon
-              const domain = DOMAINS.find((d) => d.key === event.domainId)
+              const domain = DOMAINS.find((d) => d.key === event.domainKey)
               return (
                 <div key={event.id} className="flex gap-4 relative">
                   <div className={cn('w-12 h-12 rounded-full flex items-center justify-center flex-shrink-0 z-10', config.color)}>

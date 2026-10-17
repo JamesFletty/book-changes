@@ -84,24 +84,27 @@ export default function OnboardingPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ name: workspaceName, situationType: situation }),
       })
-      if (!wsRes.ok) throw new Error('Failed to create workspace')
-      const ws = await wsRes.json()
+      if (!wsRes.ok) {
+        const data = await wsRes.json().catch(() => ({}))
+        throw new Error(data.error || 'Failed to create workspace')
+      }
 
-      // Create care recipient
+      // Create care recipient. The session reads the new family from the database,
+      // so this works immediately after the workspace is created.
       const crRes = await fetch('/api/care-recipient', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          workspaceId: ws.id,
-          ...careRecipient,
-        }),
+        body: JSON.stringify(careRecipient),
       })
-      if (!crRes.ok) throw new Error('Failed to save care recipient')
+      if (!crRes.ok) {
+        const data = await crRes.json().catch(() => ({}))
+        throw new Error(data.error || 'Failed to save care recipient')
+      }
 
       router.push('/dashboard')
       router.refresh()
     } catch (e) {
-      setError('Something went wrong. Please try again.')
+      setError(e instanceof Error ? e.message : 'Something went wrong. Please try again.')
       setLoading(false)
     }
   }
